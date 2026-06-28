@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analizador de Operaciones — Retención</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f7f6f3;
+    --surface: #ffffff;
+    --surface-2: #f0efe9;
+    --border: #e2e0d8;
+    --text: #1a1a18;
+    --text-muted: #6b6a64;
+    --accent: #2563eb;
+    --accent-bg: #eff6ff;
+    --danger: #dc2626;
+    --danger-bg: #fef2f2;
+    --warning: #d97706;
+    --warning-bg: #fffbeb;
+    --success: #16a34a;
+    --success-bg: #f0fdf4;
+    --radius: 10px;
+    --mono: 'Courier New', monospace;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  header svg { flex-shrink: 0; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header p { font-size: 13px; color: var(--text-muted); }
+
+  .main { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  /* Upload */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--surface);
+  }
+  .upload-zone:hover, .upload-zone.over {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+  }
+  .upload-zone h2 { font-size: 17px; font-weight: 600; margin: 0.75rem 0 0.35rem; }
+  .upload-zone p { font-size: 13px; color: var(--text-muted); }
+  #file-input { display: none; }
+  .upload-icon { width: 48px; height: 48px; color: var(--text-muted); margin: 0 auto; display: block; }
+
+  /* API key */
+  .api-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .api-section label { font-size: 13px; font-weight: 500; display: block; margin-bottom: 6px; }
+  .api-section input {
+    flex: 1;
+    min-width: 200px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 13px;
+    font-family: var(--mono);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .api-section input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .api-note { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
+  .tab-btn {
+    padding: 0.6rem 1.1rem;
+    font-size: 14px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-weight: 500;
+    transition: color 0.1s;
+  }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab-btn:hover:not(.active) { color: var(--text); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Metrics */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+  .metric {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
+  .metric-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  .metric-value { font-size: 26px; font-weight: 600; }
+  .metric-value.ok { color: var(--success); }
+  .metric-value.warn { color: var(--warning); }
+  .metric-value.danger { color: var(--danger); }
+
+  /* Alert items */
+  .alert-list { display: flex; flex-direction: column; gap: 8px; }
+  .alert-item {
+    padding: 0.75rem 1rem;
+    border-radius: 0;
+    border-left: 3px solid;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .alert-item.danger { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+  .alert-item.warning { background: var(--warning-bg); border-color: var(--warning); color: #92400e; }
+  .alert-item.info { background: var(--accent-bg); border-color: var(--accent); color: #1e40af; }
+  .alert-item.success { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+
+  /* Universidad blocks */
+  .uni-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 10px;
+  }
+  .uni-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; }
+  .uni-name { font-weight: 600; font-size: 15px; }
+  .badge {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-weight: 600;
+  }
+  .badge.ok { background: var(--success-bg); color: var(--success); }
+  .badge.warn { background: var(--warning-bg); color: var(--warning); }
+  .badge.danger { background: var(--danger-bg); color: var(--danger); }
+  .uni-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 13px; }
+  .uni-stat { color: var(--text-muted); }
+  .uni-stat strong { display: block; font-size: 18px; color: var(--text); font-weight: 600; }
+
+  /* Recomendaciones */
+  .rec-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 10px;
+  }
+  .rec-title { font-weight: 600; font-size: 14px; margin-bottom: 5px; display: flex; gap: 8px; align-items: center; }
+  .rec-body { font-size: 13px; color: var(--text-muted); line-height: 1.65; }
+
+  /* Mensaje */
+  .msg-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    font-size: 13px;
+    font-family: var(--mono);
+    line-height: 1.8;
+    white-space: pre-wrap;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+  }
+
+  /* Chat */
+  .chat-area {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 360px;
+  }
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 280px;
+    max-height: 420px;
+  }
+  .msg-bubble {
+    max-width: 82%;
+    padding: 0.65rem 1rem;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .msg-bubble.user {
+    background: var(--accent);
+    color: #fff;
+    margin-left: auto;
+    border-bottom-right-radius: 3px;
+  }
+  .msg-bubble.assistant {
+    background: var(--surface-2);
+    color: var(--text);
+    border-bottom-left-radius: 3px;
+  }
+  .msg-bubble.assistant.thinking { color: var(--text-muted); font-style: italic; }
+  .chat-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 0.85rem 1rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .chat-input-row input {
+    flex: 1;
+    padding: 0.55rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .chat-input-row input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .chat-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 0.5rem 1rem 0;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .hint-chip {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .hint-chip:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+  /* Buttons */
+  .btn {
+    padding: 0.5rem 1.1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.1s;
+    color: var(--text);
+  }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { background: #1d4ed8; }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: -2px;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #app-main { display: none; }
+  .section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 1.5rem 0 0.75rem;
+  }
+
+  .no-data { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 14px; }
+
+  @media (max-width: 600px) {
+    .main { padding: 1rem; }
+    .api-section { flex-direction: column; }
+    .uni-stats { grid-template-columns: 1fr 1fr; }
+    header { padding: 0.75rem 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <svg class="upload-icon" style="width:28px;height:28px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M9 17H7A5 5 0 0 1 7 7h1M15 7h1a5 5 0 0 1 0 10h-1M12 12v6M9 15l3 3 3-3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Analizador de Operaciones</h1>
+    <p>Retención universitaria — análisis diario automático</p>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Setup -->
+  <div id="setup-view">
+    <div class="api-section">
+      <div style="flex:1">
+        <label for="api-key-input">API Key de Gemini (Google) — gratis</label>
+        <input type="password" id="api-key-input" placeholder="AIza..." autocomplete="off" />
+        <p class="api-note">Obtén tu key gratis en <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com/app/apikey</a> — sin tarjeta, sin costo. No se guarda en ningún servidor.</p>
+      </div>
+    </div>
+
+    <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" accept=".xlsx,.xlsm,.xls" />
+      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <h2>Sube el reporte del día</h2>
+      <p>Archivo .xlsx o .xlsm — hojas "Tabla Conexión" y "Tiempos auxiliares"</p>
+      <p style="margin-top:0.35rem;font-size:12px;color:#aaa">También puedes arrastrar el archivo aquí</p>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="app-main">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:8px;">
+      <div>
+        <p style="font-weight:600" id="report-filename"></p>
+        <p style="font-size:13px;color:var(--text-muted)" id="report-date"></p>
+      </div>
+      <button class="btn" onclick="resetApp()">← Nuevo reporte</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('resumen')">Resumen</button>
+      <button class="tab-btn" onclick="switchTab('universidades')">Por universidad</button>
+      <button class="tab-btn" onclick="switchTab('alertas')">Alertas</button>
+      <button class="tab-btn" onclick="switchTab('mensaje')">Mensaje</button>
+      <button class="tab-btn" onclick="switchTab('chat')">Preguntar ↗</button>
+    </div>
+
+    <!-- Resumen -->
+    <div class="tab-panel active" id="tab-resumen">
+      <div class="metrics" id="metrics-grid"></div>
+      <div class="section-label">Conclusiones y recomendaciones</div>
+      <div id="recomendaciones"><div class="no-data"><span class="spinner"></span> Analizando con IA...</div></div>
+    </div>
+
+    <!-- Universidades -->
+    <div class="tab-panel" id="tab-universidades">
+      <div id="uni-blocks"></div>
+    </div>
+
+    <!-- Alertas -->
+    <div class="tab-panel" id="tab-alertas">
+      <div class="alert-list" id="alert-list"></div>
+    </div>
+
+    <!-- Mensaje -->
+    <div class="tab-panel" id="tab-mensaje">
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:0.75rem">Mensaje generado automáticamente. Puedes editarlo antes de enviar.</p>
+      <div class="msg-box" id="msg-preview" contenteditable="true"></div>
+      <button class="btn" onclick="copyMsg()">Copiar mensaje</button>
+    </div>
+
+    <!-- Chat -->
+    <div class="tab-panel" id="tab-chat">
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:0.75rem">
+        Pregunta lo que quieras sobre el reporte — los datos están cargados en el contexto.
+      </div>
+      <div class="chat-area">
+        <div class="chat-messages" id="chat-messages">
+          <div class="msg-bubble assistant">Hola. Tengo los datos del reporte cargados. ¿Qué quieres saber?</div>
+        </div>
+        <div class="chat-hint" id="hint-chips"></div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="¿Qué universidad tuvo peor desempeño hoy?" onkeydown="if(event.key==='Enter') sendChat()" />
+          <button class="btn primary" onclick="sendChat()">Enviar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let reportData = null;
+let chatHistory = [];
+let reportContext = '';
+
+// ─── File handling ───────────────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('over'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+
+function processFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'binary' });
+      const conSheet = wb.SheetNames.find(n => n.toLowerCase().includes('conexi'));
+      const auxSheet = wb.SheetNames.find(n => n.toLowerCase().includes('auxiliar'));
+      if (!conSheet || !auxSheet) {
+        alert('No se encontraron las hojas "Tabla Conexión" y "Tiempos auxiliares" en el archivo.');
+        return;
+      }
+      const conData = XLSX.utils.sheet_to_json(wb.Sheets[conSheet], { defval: null });
+      const auxData = XLSX.utils.sheet_to_json(wb.Sheets[auxSheet], { defval: null });
+      document.getElementById('report-filename').textContent = file.name;
+      document.getElementById('report-date').textContent = 'Cargado: ' + new Date().toLocaleDateString('es-CO', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+      analyzeData(conData, auxData);
+    } catch(err) {
+      alert('Error leyendo el archivo: ' + err.message);
+    }
+  };
+  reader.readAsBinaryString(file);
+}
+
+// ─── Data analysis ───────────────────────────────────────────────
+function toMinutes(dec) {
+  if (!dec || isNaN(dec) || dec <= 0) return 0;
+  return Math.round(parseFloat(dec) * 24 * 60);
+}
+
+function getField(row, candidates) {
+  for (const k of Object.keys(row)) {
+    const kn = k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'');
+    for (const c of candidates) {
+      const cn = c.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'');
+      if (kn.includes(cn)) return row[k];
+    }
+  }
+  return null;
+}
+
+function analyzeData(conData, auxData) {
+  const conexRows = conData.filter(r => {
+    const ag = getField(r, ['agente']);
+    return ag && typeof ag === 'string' && ag.trim() && !ag.toLowerCase().includes('total') && !ag.toLowerCase().includes('general') && ag.trim() !== '';
+  });
+
+  const auxRows = auxData.filter(r => {
+    const ag = getField(r, ['agente']);
+    return ag && typeof ag === 'string' && ag.trim() && !ag.toLowerCase().includes('total');
+  });
+
+  const LIMITE = 10;
+  let sinConexion = 0, retardo = 0, horasInsuf = 0;
+  const unicStats = {};
+  const alertas = [];
+
+  conexRows.forEach(row => {
+    const agente = getField(row, ['agente']) || '';
+    const alianza = getField(row, ['alianza','universidad']) || 'Sin asignar';
+    const conexion = getField(row, ['conexion','conexión']);
+    const hProg = getField(row, ['horas programadas','horasprogramadas']);
+    const hCon = getField(row, ['horas conexion','horasconexion','horas conexión']);
+    const contactadas = getField(row, ['total contactadas','totalcontactadas','contactadas']);
+    const pctTotal = getField(row, ['% total contactadas','%totalcontactadas','porcentaje']);
+
+    const conxStr = (conexion || '').toString().toLowerCase();
+    if (conxStr.includes('retardo')) retardo++;
+    if (typeof conexion === 'number' && conexion === 0) sinConexion++;
+
+    if (hProg && hCon && typeof hProg === 'number' && typeof hCon === 'number') {
+      if (hCon < hProg * 0.9 && hProg > 0) horasInsuf++;
+    }
+
+    const uni = alianza.toString().trim().split('/')[0].trim();
+    if (!unicStats[uni]) unicStats[uni] = { contactadas: 0, pctList: [], sinConexion: 0, agentes: 0 };
+    unicStats[uni].agentes++;
+    unicStats[uni].contactadas += (typeof contactadas === 'number' ? contactadas : 0);
+    if (typeof pctTotal === 'number') unicStats[uni].pctList.push(pctTotal);
+    if (typeof conexion === 'number' && conexion === 0) unicStats[uni].sinConexion++;
+  });
+
+  let dispExceso = 0, banoExceso = 0, pausasExceso = 0, noRespExceso = 0;
+  const agentesProblemas = [];
+
+  auxRows.forEach(row => {
+    const agente = getField(row, ['agente']) || '';
+    const disp = toMinutes(getField(row, ['disponible']));
+    const bano = toMinutes(getField(row, ['bano','baño']));
+    const pausas = toMinutes(getField(row, ['pausas activas','pausasactivas']));
+    const noResp = toMinutes(getField(row, ['no responde','noresponde']));
+
+    const p = [];
+    if (disp > LIMITE) { dispExceso++; p.push(`Disponible ${disp}m`); }
+    if (bano > LIMITE) { banoExceso++; p.push(`Baño ${bano}m`); }
+    if (pausas > LIMITE) { pausasExceso++; p.push(`Pausas ${pausas}m`); }
+    if (noResp > LIMITE) { noRespExceso++; p.push(`No responde ${noResp}m`); }
+    if (p.length) agentesProblemas.push({ agente: agente.split(' ').slice(0,2).join(' '), problemas: p });
+  });
+
+  if (sinConexion > 0) alertas.push({ tipo: 'danger', texto: `${sinConexion} agente${sinConexion>1?'s':''} programado${sinConexion>1?'s':''} sin conexión` });
+  if (retardo > 0) alertas.push({ tipo: 'warning', texto: `${retardo} agente${retardo>1?'s':''} con retardo en el ingreso` });
+  if (horasInsuf > 0) alertas.push({ tipo: 'warning', texto: `${horasInsuf} agente${horasInsuf>1?'s':''} con menos del 90% de horas cumplidas` });
+  if (dispExceso > 0) alertas.push({ tipo: 'danger', texto: `${dispExceso} asesor${dispExceso>1?'es':''} superaron 10 min en estado Disponible (no permitido)` });
+  if (banoExceso > 0) alertas.push({ tipo: 'warning', texto: `${banoExceso} persona${banoExceso>1?'s':''} superaron 10 min en estado Baño` });
+  if (pausasExceso > 0) alertas.push({ tipo: 'warning', texto: `${pausasExceso} persona${pausasExceso>1?'s':''} superaron 10 min en Pausas Activas` });
+  if (noRespExceso > 0) alertas.push({ tipo: 'danger', texto: `${noRespExceso} persona${noRespExceso>1?'s':''} superaron 10 min en No Responde` });
+
+  Object.entries(unicStats).filter(([k]) => !['Sin asignar','#N/A','#¡VALOR!'].includes(k)).forEach(([uni, stats]) => {
+    const avg = stats.pctList.length ? stats.pctList.reduce((a,b)=>a+b,0)/stats.pctList.length : 0;
+    if (avg < 0.4 && stats.pctList.length > 0) alertas.push({ tipo: 'warning', texto: `${uni}: % contactadas por debajo del 40% (${Math.round(avg*100)}%)` });
+  });
+
+  if (alertas.length === 0) alertas.push({ tipo: 'success', texto: 'Sin alertas críticas — operación dentro de parámetros' });
+
+  reportData = { conexRows: conexRows.length, sinConexion, retardo, horasInsuf, dispExceso, banoExceso, pausasExceso, noRespExceso, unicStats, alertas, agentesProblemas };
+
+  buildContext(reportData);
+  renderAll(reportData);
+
+  document.getElementById('setup-view').style.display = 'none';
+  document.getElementById('app-main').style.display = 'block';
+
+  callAI(reportData);
+}
+
+// ─── Build context string for chat ───────────────────────────────
+function buildContext(data) {
+  const unis = Object.entries(data.unicStats).filter(([k]) => !['Sin asignar','#N/A','#¡VALOR!'].includes(k));
+  let ctx = `REPORTE DIARIO DE OPERACIONES — ${new Date().toLocaleDateString('es-CO')}\n\n`;
+  ctx += `RESUMEN GENERAL:\n`;
+  ctx += `- Total agentes: ${data.conexRows}\n`;
+  ctx += `- Sin conexión: ${data.sinConexion}\n`;
+  ctx += `- Con retardo: ${data.retardo}\n`;
+  ctx += `- Horas insuficientes: ${data.horasInsuf}\n`;
+  ctx += `- Disponible (exceso): ${data.dispExceso}\n`;
+  ctx += `- Baño (exceso): ${data.banoExceso}\n`;
+  ctx += `- Pausas activas (exceso): ${data.pausasExceso}\n`;
+  ctx += `- No responde (exceso): ${data.noRespExceso}\n\n`;
+  ctx += `POR UNIVERSIDAD:\n`;
+  unis.forEach(([uni, stats]) => {
+    const avg = stats.pctList.length ? Math.round((stats.pctList.reduce((a,b)=>a+b,0)/stats.pctList.length)*100) : 0;
+    ctx += `- ${uni}: ${stats.contactadas} contactadas, ${avg}% promedio, ${stats.sinConexion} sin conexión, ${stats.agentes} agentes\n`;
+  });
+  ctx += `\nALERTAS:\n`;
+  data.alertas.forEach(a => ctx += `[${a.tipo.toUpperCase()}] ${a.texto}\n`);
+  if (data.agentesProblemas.length) {
+    ctx += `\nAGENTES CON PROBLEMAS EN TIEMPOS AUXILIARES:\n`;
+    data.agentesProblemas.forEach(a => ctx += `- ${a.agente}: ${a.problemas.join(', ')}\n`);
+  }
+  reportContext = ctx;
+}
+
+// ─── Render ───────────────────────────────────────────────────────
+function renderAll(data) {
+  const cv = (n, ok=0, warn=0) => n <= ok ? 'ok' : n <= warn ? 'warn' : 'danger';
+
+  document.getElementById('metrics-grid').innerHTML = `
+    <div class="metric"><div class="metric-label">Agentes</div><div class="metric-value">${data.conexRows}</div></div>
+    <div class="metric"><div class="metric-label">Sin conexión</div><div class="metric-value ${cv(data.sinConexion, 0, 1)}">${data.sinConexion}</div></div>
+    <div class="metric"><div class="metric-label">Retardos</div><div class="metric-value ${cv(data.retardo, 0, 2)}">${data.retardo}</div></div>
+    <div class="metric"><div class="metric-label">Disponible exceso</div><div class="metric-value ${cv(data.dispExceso, 0, 2)}">${data.dispExceso}</div></div>
+    <div class="metric"><div class="metric-label">No responde</div><div class="metric-value ${cv(data.noRespExceso, 0, 3)}">${data.noRespExceso}</div></div>
+    <div class="metric"><div class="metric-label">Pausas exceso</div><div class="metric-value ${cv(data.pausasExceso, 0, 4)}">${data.pausasExceso}</div></div>
+  `;
+
+  const unis = Object.entries(data.unicStats).filter(([k]) => !['Sin asignar','#N/A','#¡VALOR!'].includes(k));
+  document.getElementById('uni-blocks').innerHTML = unis.map(([uni, stats]) => {
+    const avg = stats.pctList.length ? Math.round((stats.pctList.reduce((a,b)=>a+b,0)/stats.pctList.length)*100) : 0;
+    const nivel = avg >= 45 ? 'ok' : avg >= 35 ? 'warn' : 'danger';
+    const etiqueta = avg >= 45 ? 'Normal' : avg >= 35 ? 'Atención' : 'Crítico';
+    return `<div class="uni-block">
+      <div class="uni-header"><span class="uni-name">${uni}</span><span class="badge ${nivel}">${etiqueta}</span></div>
+      <div class="uni-stats">
+        <div class="uni-stat"><strong>${stats.contactadas}</strong>Contactadas</div>
+        <div class="uni-stat"><strong>${avg}%</strong>% prom. contactadas</div>
+        <div class="uni-stat"><strong>${stats.sinConexion}</strong>Sin conexión</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('alert-list').innerHTML = data.alertas.map(a =>
+    `<div class="alert-item ${a.tipo}">${a.texto}</div>`
+  ).join('');
+
+  buildMsg(data, unis);
+  buildHints(unis);
+}
+
+function buildMsg(data, unis) {
+  const hoy = new Date().toLocaleDateString('es-CO', { day:'2-digit', month:'2-digit', year:'numeric' });
+  let msg = `Estimados,\n\nLes comparto el reporte de conexiones, gestiones y tiempos auxiliares del día ${hoy}.\n\nLo más crítico del reporte:\n\n`;
+  if (data.sinConexion > 0) msg += `* Conexión: ${data.sinConexion} persona${data.sinConexion!==1?'s':''} programada${data.sinConexion!==1?'s':''} sin conexión${data.retardo>0?` y ${data.retardo} con retardo`:''}.`;
+  if (data.dispExceso > 0) msg += `\n* Estado Disponible: ${data.dispExceso} asesor${data.dispExceso!==1?'es':''} que superan los 10 minutos. Ningún asesor debe usar este auxiliar.`;
+  if (data.banoExceso > 0) msg += `\n* Estado Baño: ${data.banoExceso} persona${data.banoExceso!==1?'s':''} con más de los 10 minutos asignados.`;
+  if (data.pausasExceso > 0) msg += `\n* Estado Pausas Activas: ${data.pausasExceso} persona${data.pausasExceso!==1?'s':''} que superan los 10 minutos asignados.`;
+  if (data.noRespExceso > 0) msg += `\n* Estado No Responde: ${data.noRespExceso} persona${data.noRespExceso!==1?'s':''} que superan los 10 minutos sin atender llamadas.`;
+
+  (unis || []).forEach(([uni, stats]) => {
+    const avg = stats.pctList.length ? Math.round((stats.pctList.reduce((a,b)=>a+b,0)/stats.pctList.length)*100) : 0;
+    msg += `\n\n--- ${uni} ---`;
+    msg += `\n* Total contactadas: ${stats.contactadas}`;
+    msg += `\n* % contactadas promedio: ${avg}%`;
+    if (stats.sinConexion > 0) msg += `\n* Conexión: ${stats.sinConexion} persona${stats.sinConexion!==1?'s':''} sin conexión`;
+  });
+
+  msg += `\n\nPor favor validar novedades con los equipos correspondientes.`;
+  document.getElementById('msg-preview').textContent = msg;
+}
+
+function buildHints(unis) {
+  const preguntas = [
+    '¿Qué universidad tuvo peor desempeño?',
+    '¿Qué agentes tuvieron más problemas hoy?',
+    '¿Qué recomiendas para mejorar mañana?',
+    '¿Cómo está el porcentaje de contactadas vs el objetivo?',
+  ];
+  if (unis.length > 0) preguntas.push(`¿Cómo va ${unis[0][0]} esta semana?`);
+  document.getElementById('hint-chips').innerHTML = preguntas.map(p =>
+    `<span class="hint-chip" onclick="setQuestion('${p}')">${p}</span>`
+  ).join('');
+}
+
+function setQuestion(q) {
+  document.getElementById('chat-input').value = q;
+  document.getElementById('chat-input').focus();
+}
+
+// ─── AI calls ────────────────────────────────────────────────────
+function getKey() {
+  return document.getElementById('api-key-input').value.trim();
+}
+
+async function callAI(data) {
+  const key = getKey();
+  if (!key) {
+    document.getElementById('recomendaciones').innerHTML = '<div class="no-data">Ingresa tu API Key para ver el análisis con IA.</div>';
+    return;
+  }
+
+  const prompt = `Eres un analista senior de operaciones de call center especializado en retención universitaria latinoamericana. Con base en los datos del día, entrega exactamente 4 conclusiones y recomendaciones concretas, accionables y específicas para el equipo coordinador. Sé directo, sin lenguaje corporativo.
+
+${reportContext}
+
+Responde SOLO en JSON sin backticks:
+{"recomendaciones":[{"titulo":"string corto","cuerpo":"2-3 oraciones concretas","nivel":"danger|warning|info|success"}]}`;
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 1000 } })
+    });
+    const json = await res.json();
+    if (json.error) { document.getElementById('recomendaciones').innerHTML = `<div class="no-data">Error API: ${json.error.message}</div>`; return; }
+    const text = json.candidates?.[0]?.content?.parts?.map(p => p.text||'').join('') || '';
+    const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
+    const iconos = { danger: '⚠️', warning: '⚡', info: '💡', success: '✅' };
+    document.getElementById('recomendaciones').innerHTML = parsed.recomendaciones.map(r =>
+      `<div class="rec-block">
+        <div class="rec-title">${iconos[r.nivel]||'💡'} ${r.titulo}</div>
+        <div class="rec-body">${r.cuerpo}</div>
+      </div>`
+    ).join('');
+  } catch(err) {
+    document.getElementById('recomendaciones').innerHTML = `<div class="no-data">No se pudo conectar con la IA. Verifica tu API key.</div>`;
+  }
+}
+
+async function sendChat() {
+  const key = getKey();
+  const input = document.getElementById('chat-input');
+  const q = input.value.trim();
+  if (!q) return;
+  if (!key) { alert('Ingresa tu API Key para usar el chat.'); return; }
+
+  input.value = '';
+  addBubble(q, 'user');
+  const thinking = addBubble('Pensando...', 'assistant thinking');
+
+  chatHistory.push({ role: 'user', content: q });
+
+  const systemPrompt = `Eres un analista de operaciones de call center especializado en retención universitaria. Tienes acceso a los datos del reporte del día. Responde de forma clara, concisa y accionable. Usa los datos exactos del reporte.
+
+DATOS DISPONIBLES:
+${reportContext}`;
+
+  try {
+    const fullPrompt = `${systemPrompt}\n\nHistorial de conversación:\n${chatHistory.slice(0,-1).map(m=>`${m.role==='user'?'Usuario':'Asistente'}: ${m.content}`).join('\n')}\n\nUsuario: ${q}`;
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: fullPrompt }] }], generationConfig: { maxOutputTokens: 800 } })
+    });
+    const json = await res.json();
+    if (json.error) { thinking.textContent = 'Error: ' + json.error.message; thinking.classList.remove('thinking'); return; }
+    const reply = json.candidates?.[0]?.content?.parts?.map(p => p.text||'').join('') || 'Sin respuesta';
+    thinking.textContent = reply;
+    thinking.classList.remove('thinking');
+    chatHistory.push({ role: 'assistant', content: reply });
+  } catch(err) {
+    thinking.textContent = 'No se pudo conectar. Verifica tu API key.';
+    thinking.classList.remove('thinking');
+  }
+}
+
+function addBubble(text, cls) {
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'msg-bubble ' + cls;
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+// ─── Utilities ────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', ['resumen','universidades','alertas','mensaje','chat'][i] === name));
+  document.querySelectorAll('.tab-panel').forEach((p,i) => p.classList.toggle('active', ['tab-resumen','tab-universidades','tab-alertas','tab-mensaje','tab-chat'][i] === 'tab-'+name));
+}
+
+function copyMsg() {
+  const text = document.getElementById('msg-preview').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => btn.textContent = 'Copiar mensaje', 2000);
+  });
+}
+
+function resetApp() {
+  reportData = null;
+  chatHistory = [];
+  reportContext = '';
+  document.getElementById('setup-view').style.display = 'block';
+  document.getElementById('app-main').style.display = 'none';
+  document.getElementById('chat-messages').innerHTML = '<div class="msg-bubble assistant">Hola. Tengo los datos del reporte cargados. ¿Qué quieres saber?</div>';
+  fileInput.value = '';
+}
+</script>
+</body>
+</html>
